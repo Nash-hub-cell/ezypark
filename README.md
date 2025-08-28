@@ -1,90 +1,130 @@
-# We-Up: A Web-Based Goal and Progress Tracking Application
+# We-Up: A Web-Based Goal and Progress Tracking Application (Supabase Edition)
 
 ## 1. Overview
 
 We-Up is a simple yet powerful web application designed to help users track their personal progress in any activity they choose. Whether it's fitness, learning a new skill, or building a new habit, We-Up provides a clean and encouraging interface to help you stay motivated and achieve your goals.
 
-This project was built with plain HTML, CSS, and JavaScript, and it uses Firebase for all backend services, including authentication and database storage.
+This version of the project uses **Supabase** for all backend services, including authentication and a Postgres database.
 
 ## 2. Features
 
-*   **User Authentication:** Secure sign-up and login system using Firebase Authentication.
+*   **User Authentication:** Secure sign-up and login system using Supabase Authentication.
 *   **Goal Management:** Full CRUD (Create, Read, Update, Delete) functionality for personal goals.
-*   **Progress Logging:** Users can log quantitative progress for each of their goals, including a numerical value and a text note.
-*   **Data Visualization:** A dynamic line chart visualizes the user's progress over time for each goal, providing clear insights into their journey.
-*   **Motivational Messaging:** Displays a random motivational quote upon login to keep users inspired.
-*   **Responsive Design:** A clean, mobile-first interface that works well on both desktop and mobile devices.
+*   **Progress Logging:** Users can log quantitative progress for each of their goals.
+*   **Data Visualization:** A dynamic line chart visualizes progress over time.
+*   **Motivational Messaging:** Displays a random motivational quote to keep users inspired.
+*   **Secure by Default:** Uses Supabase's Row Level Security (RLS) to ensure users can only access their own data.
 
 ## 3. Setup and Running the Project
 
-To run this application locally, you will need a web browser and a local web server. You will also need to set up a free Firebase project to handle the backend.
+To run this application, you will need to set up a free Supabase project to handle the backend.
 
-### Step 1: Set Up Firebase
+### Step 1: Create a Supabase Project
 
-1.  Go to the [Firebase Console](https://console.firebase.google.com/).
-2.  Click on **"Add project"** and follow the steps to create a new project.
-3.  Once your project is created, navigate to the **Project Overview** page. Click on the web icon (`</>`) to add a web app to your project.
-4.  Give your app a nickname and click **"Register app"**.
-5.  After registering, Firebase will provide you with a `firebaseConfig` object. This object contains your project's unique API keys and identifiers. **You will need this for the next step.**
-6.  In the Firebase console, navigate to the **Authentication** section. Click on the "Sign-in method" tab and enable the **"Email/Password"** provider.
-7.  Navigate to the **Firestore Database** section. Click **"Create database"**, start in **test mode** for easy setup (you can secure it later with security rules), and choose a location for your database.
+1.  Go to [supabase.com](https://supabase.com/), sign up, and create a new project.
+2.  When creating the project, make sure to save your **Database Password** securely.
+3.  Once the project is created, navigate to the **Project Settings** (the gear icon).
+4.  Go to the **API** section. Here you will find your **Project URL** and your `public` **anon key**. You will need these for Step 3.
 
-### Step 2: Configure the Application
+### Step 2: Set Up the Database Schema
 
-1.  Open the `script.js` file in this project.
-2.  At the top of the file, you will find a placeholder `firebaseConfig` object.
-3.  Replace the placeholder values with the actual values from your Firebase project that you obtained in the previous step.
+You need to create two tables in your Supabase database: `goals` and `progress`.
 
-```javascript
-// BEFORE
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+1.  In your Supabase project, go to the **SQL Editor** (the icon that looks like a terminal window with `SQL` on it).
+2.  Click **"New query"**.
+3.  Copy the entire SQL script below and paste it into the SQL Editor.
+4.  Click **"RUN"** to execute the script. This will create the tables and enable Row Level Security.
 
-// AFTER (example)
-const firebaseConfig = {
-  apiKey: "AIzaSyB..._Qc",
-  authDomain: "we-up-app-12345.firebaseapp.com",
-  projectId: "we-up-app-12345",
-  storageBucket: "we-up-app-12345.appspot.com",
-  messagingSenderId: "123456789012",
-  appId: "1:123456789012:web:a1b2c3d4e5f67890"
-};
+```sql
+-- 1. Create the 'goals' table
+CREATE TABLE public.goals (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  title text NOT NULL,
+  description text NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT goals_pkey PRIMARY KEY (id),
+  CONSTRAINT goals_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+-- 2. Create the 'progress' table
+CREATE TABLE public.progress (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  goal_id uuid NOT NULL,
+  value numeric NOT NULL,
+  note text NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT progress_pkey PRIMARY KEY (id),
+  CONSTRAINT progress_goal_id_fkey FOREIGN KEY (goal_id) REFERENCES public.goals(id) ON DELETE CASCADE
+);
+
+-- 3. Enable Row Level Security (RLS) on both tables
+ALTER TABLE public.goals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.progress ENABLE ROW LEVEL SECURITY;
 ```
 
-### Step 3: Run the Application
+### Step 3: Set Up Row Level Security (RLS) Policies
 
-Because this application uses JavaScript modules and fetches data from Firebase, you need to run it from a local web server. You cannot simply open the `index.html` file directly in your browser from your file system.
+For security, you must define rules that control which rows users can access. Run the following SQL script in the **SQL Editor** in the same way you did for the tables.
 
-A very simple way to do this is with Python's built-in HTTP server.
+```sql
+-- POLICIES FOR 'goals' TABLE
 
+-- 1. Allow users to view their own goals
+CREATE POLICY "Users can view their own goals"
+ON public.goals FOR SELECT
+USING (auth.uid() = user_id);
+
+-- 2. Allow users to insert their own goals
+CREATE POLICY "Users can insert their own goals"
+ON public.goals FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+
+-- 3. Allow users to update their own goals
+CREATE POLICY "Users can update their own goals"
+ON public.goals FOR UPDATE
+USING (auth.uid() = user_id);
+
+-- 4. Allow users to delete their own goals
+CREATE POLICY "Users can delete their own goals"
+ON public.goals FOR DELETE
+USING (auth.uid() = user_id);
+
+
+-- POLICIES FOR 'progress' TABLE
+
+-- 1. Allow users to view progress for their own goals
+CREATE POLICY "Users can view progress for their own goals"
+ON public.progress FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.goals
+    WHERE goals.id = progress.goal_id AND goals.user_id = auth.uid()
+  )
+);
+
+-- 2. Allow users to insert progress for their own goals
+CREATE POLICY "Users can insert progress for their own goals"
+ON public.progress FOR INSERT
+WITH CHECK (
+  EXISTS (
+    SELECT 1
+    FROM public.goals
+    WHERE goals.id = progress.goal_id AND goals.user_id = auth.uid()
+  )
+);
+```
+
+### Step 4: Configure the Application
+
+1.  Open the `script.js` file in this project.
+2.  At the top of the file, replace the placeholder values for `SUPABASE_URL` and `SUPABASE_ANON_KEY` with the values you copied from your Supabase project's API settings.
+
+### Step 5: Run the Application
+
+To run the app, you need to serve the files from a local web server.
 1.  Open your terminal or command prompt.
-2.  Navigate to the root directory of this project (where `index.html` is located).
-3.  Run the following command:
-
-    ```bash
-    # For Python 3
-    python -m http.server
-
-    # For Python 2
-    python -m SimpleHTTPServer
-    ```
-4.  Open your web browser and go to `http://localhost:8000`. The application should now be running.
-
-Alternatively, if you are using a code editor like VS Code, you can use the **"Live Server"** extension to easily serve the project.
-
-## 4. Monetization Ideas
-
-As requested, here are a few potential monetization strategies for the "We-Up" app if it were to be developed further:
-
-*   **Freemium Model:**
-    *   **Free Tier:** Basic features like goal creation (up to 3 goals), progress logging, and motivational messages.
-    *   **Premium Tier ($):** Unlimited goals, advanced chart analytics (e.g., trend lines, weekly/monthly summaries), data export, custom message tones, and an ad-free experience.
-*   **AI-Powered Insights ($$):** A higher premium tier that integrates with an AI model (like OpenAI) to provide personalized feedback and insights based on the user's progress data. For example, the AI could notice when a user is most productive and suggest adjustments to their schedule.
-*   **Cosmetic Customization:** Allow users to purchase themes, custom color palettes, or unique icon packs for their goals.
-*   **One-Time Purchase:** A "Pro" version of the app that unlocks all features for a single payment.
+2.  Navigate to the root directory of this project.
+3.  Run `python -m http.server`.
+4.  Open your web browser and go to `http://localhost:8000`.

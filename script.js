@@ -1,18 +1,15 @@
-// --- Firebase Initialization ---
-// IMPORTANT: Replace with your actual Firebase project configuration.
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+// --- Supabase Initialization ---
+// IMPORTANT: Replace with your actual Supabase project URL and anon key.
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
-// Initialize Firebase
-const app = firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
+// The 'supabase' object is loaded from the CDN script in index.html
+const { createClient } = supabase;
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Overwrite the global supabase object with our initialized client
+// This is a bit of a hack to avoid changing all the supabase references below
+window.supabase = supabaseClient;
 
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -52,8 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const motivationalMessageContainer = document.getElementById('motivational-message');
 
     // --- State Variables ---
-    let goalsUnsubscribe = null;
-    let progressUnsubscribe = null;
+    let goalsSubscription = null;
+    let progressSubscription = null;
     let currentGoalId = null;
     let progressChart = null;
 
@@ -73,24 +70,46 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- Auth State Listener ---
-    auth.onAuthStateChanged(user => {
-        if (user) {
+    supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session && session.user) {
             authContainer.style.display = 'none';
             appContainer.style.display = 'block';
             displayMotivationalMessage();
-            if (goalsUnsubscribe) goalsUnsubscribe();
-            goalsUnsubscribe = db.collection('goals').where('userId', '==', user.uid)
-                .orderBy('createdAt', 'desc')
-                .onSnapshot(snapshot => {
-                    renderGoals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                }, err => console.error("Error fetching goals: ", err));
+            await fetchAndRenderGoals(session.user);
         } else {
             authContainer.style.display = 'block';
             appContainer.style.display = 'none';
-            if (goalsUnsubscribe) goalsUnsubscribe();
-            if (progressUnsubscribe) progressUnsubscribe();
+            if (goalsSubscription) goalsSubscription.unsubscribe();
+            if (progressSubscription) progressSubscription.unsubscribe();
         }
     });
+
+    // --- Auth Logic ---
+    signupButton.addEventListener('click', async () => {
+        const email = document.getElementById('signup-email').value;
+        const password = document.getElementById('signup-password').value;
+        if (!email || !password) { alert("Please enter both email and password."); return; }
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) alert(`Error signing up: ${error.message}`);
+        else alert('Sign up successful! Please check your email to verify your account.');
+    });
+
+    loginButton.addEventListener('click', async () => {
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        if (!email || !password) { alert("Please enter both email and password."); return; }
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) alert(`Error logging in: ${error.message}`);
+    });
+
+    logoutButton.addEventListener('click', async () => {
+        const { error } = await supabase.auth.signOut();
+        if (error) alert(`Error logging out: ${error.message}`);
+    });
+
+    showSignup.addEventListener('click', (e) => { e.preventDefault(); loginForm.style.display = 'none'; signupForm.style.display = 'block'; });
+    showLogin.addEventListener('click', (e) => { e.preventDefault(); signupForm.style.display = 'none'; loginForm.style.display = 'block'; });
+
 
     // --- Modal UI Logic ---
     const openModal = (modal) => modal.classList.add('show');
@@ -102,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (modal === progressModal) {
             progressForm.reset();
             currentGoalId = null;
-            if (progressUnsubscribe) progressUnsubscribe();
+            if (progressSubscription) progressSubscription.unsubscribe();
             if (progressChart) progressChart.destroy();
         }
     };
@@ -121,9 +140,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- CRUD Logic for Goals ---
+    const fetchAndRenderGoals = async (user) => {
+        const { data: goals, error } = await supabase.from('goals').select('*').order('created_at', { ascending: false });
+        if (error) { console.error('Error fetching goals:', error); return; }
+        renderGoals(goals);
+
+        if (goalsSubscription) goalsSubscription.unsubscribe();
+        goalsSubscription = supabase.channel('public:goals')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'goals' }, () => fetchAndRenderGoals(user))
+            .subscribe();
+    };
+
     const renderGoals = (goals) => {
         goalsList.innerHTML = '';
-        if (goals.length === 0) {
+        if (!goals || goals.length === 0) {
             goalsList.innerHTML = '<p>You haven\'t set any goals yet. Let\'s add one!</p>';
             return;
         }
@@ -145,27 +175,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    goalForm.addEventListener('submit', e => {
+    goalForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const title = goalTitleInput.value;
         const description = goalDescriptionInput.value;
         const goalId = goalIdInput.value;
-        const user = auth.currentUser;
-        if (!title || !user) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!title || !user) { alert("Title is required."); return; }
 
-        if (goalId) {
-            db.collection('goals').doc(goalId).update({ title, description })
-                .catch(err => console.error('Error updating goal:', err));
-        } else {
-            db.collection('goals').add({
-                title, description, userId: user.uid,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            }).catch(err => console.error('Error adding goal:', err));
-        }
+        const { error } = goalId
+            ? await supabase.from('goals').update({ title, description }).eq('id', goalId)
+            : await supabase.from('goals').insert({ title, description, user_id: user.id });
+
+        if (error) alert(`Error saving goal: ${error.message}`);
         closeModal(goalModal);
     });
 
-    goalsList.addEventListener('click', e => {
+    goalsList.addEventListener('click', async (e) => {
         const target = e.target;
         const goalItem = target.closest('.goal-item');
         if (!goalItem) return;
@@ -173,48 +199,52 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (target.classList.contains('delete-btn')) {
             if (confirm('Are you sure you want to delete this goal?')) {
-                db.collection('goals').doc(id).delete().catch(err => console.error('Error deleting goal:', err));
+                const { error } = await supabase.from('goals').delete().eq('id', id);
+                if (error) alert(`Error deleting goal: ${error.message}`);
             }
         } else if (target.classList.contains('edit-btn')) {
-            db.collection('goals').doc(id).get().then(doc => {
-                if (doc.exists) {
-                    const goal = doc.data();
-                    modalTitle.innerText = 'Edit Goal';
-                    goalIdInput.value = id;
-                    goalTitleInput.value = goal.title;
-                    goalDescriptionInput.value = goal.description;
-                    openModal(goalModal);
-                }
-            });
+            const { data: goal, error } = await supabase.from('goals').select('*').eq('id', id).single();
+            if (error) { alert(`Error fetching goal: ${error.message}`); }
+            else {
+                modalTitle.innerText = 'Edit Goal';
+                goalIdInput.value = id;
+                goalTitleInput.value = goal.title;
+                goalDescriptionInput.value = goal.description;
+                openModal(goalModal);
+            }
         } else {
             currentGoalId = id;
-            db.collection('goals').doc(id).get().then(doc => {
-                progressModalTitle.innerText = `Progress for "${doc.data().title}"`;
-            });
+            const { data: goal } = await supabase.from('goals').select('title').eq('id', id).single();
+            progressModalTitle.innerText = `Progress for "${goal.title}"`;
+            fetchAndRenderProgress(id);
             openModal(progressModal);
-
-            if (progressUnsubscribe) progressUnsubscribe();
-            progressUnsubscribe = db.collection('goals').doc(id).collection('progress')
-                .orderBy('createdAt', 'asc')
-                .onSnapshot(snapshot => {
-                    const progressEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    renderProgress(progressEntries.slice().reverse());
-                    renderChart(progressEntries);
-                }, err => console.error("Error fetching progress: ", err));
         }
     });
 
     // --- CRUD Logic for Progress ---
+    const fetchAndRenderProgress = async (goalId) => {
+        const { data: progressEntries, error } = await supabase.from('progress').select('*').eq('goal_id', goalId).order('created_at', { ascending: true });
+        if (error) { console.error('Error fetching progress:', error); return; }
+        renderProgress(progressEntries);
+        renderChart(progressEntries);
+
+        if (progressSubscription) progressSubscription.unsubscribe();
+        progressSubscription = supabase.channel(`public:progress:goal_id=eq.${goalId}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'progress', filter: `goal_id=eq.${goalId}` }, () => fetchAndRenderProgress(goalId))
+            .subscribe();
+    };
+
     const renderProgress = (progressEntries) => {
         progressList.innerHTML = '';
-        if (progressEntries.length === 0) {
+        if (!progressEntries || progressEntries.length === 0) {
             progressList.innerHTML = '<p>No progress logged yet. Add your first entry!</p>';
             return;
         }
-        progressEntries.forEach(entry => {
+        // Show newest first in the list
+        progressEntries.slice().reverse().forEach(entry => {
             const progressEl = document.createElement('div');
             progressEl.className = 'progress-item';
-            const date = entry.createdAt ? entry.createdAt.toDate().toLocaleDateString() : 'Just now';
+            const date = new Date(entry.created_at).toLocaleDateString();
             progressEl.innerHTML = `
                 <p class="note"><strong>Value: ${entry.value}</strong> - ${entry.note || ''}</p>
                 <p class="date">${date}</p>
@@ -225,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const renderChart = (progressEntries) => {
         if (progressChart) progressChart.destroy();
-        const labels = progressEntries.map(entry => entry.createdAt ? entry.createdAt.toDate().toLocaleDateString() : '');
+        const labels = progressEntries.map(entry => new Date(entry.created_at).toLocaleDateString());
         const data = progressEntries.map(entry => entry.value);
 
         progressChart = new Chart(progressChartCanvas, {
@@ -237,35 +267,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    progressForm.addEventListener('submit', e => {
+    progressForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const value = parseFloat(progressValueInput.value);
         const note = progressNoteInput.value;
         if (isNaN(value) || !currentGoalId) { alert('Please enter a valid number for the value.'); return; }
 
-        db.collection('goals').doc(currentGoalId).collection('progress').add({
-            value, note, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).then(() => {
-            progressForm.reset();
-        }).catch(err => console.error("Error logging progress:", err));
+        const { error } = await supabase.from('progress').insert({ value, note, goal_id: currentGoalId });
+        if (error) alert(`Error logging progress: ${error.message}`);
+        else progressForm.reset();
     });
-
-    // --- Auth Logic ---
-    showSignup.addEventListener('click', (e) => { e.preventDefault(); loginForm.style.display = 'none'; signupForm.style.display = 'block'; });
-    showLogin.addEventListener('click', (e) => { e.preventDefault(); signupForm.style.display = 'none'; loginForm.style.display = 'block'; });
-    signupButton.addEventListener('click', () => {
-        const email = document.getElementById('signup-email').value;
-        const password = document.getElementById('signup-password').value;
-        if (!email || !password) { alert("Please enter both email and password."); return; }
-        auth.createUserWithEmailAndPassword(email, password).catch(err => alert(`Error: ${err.message}`));
-    });
-    loginButton.addEventListener('click', () => {
-        const email = document.getElementById('login-email').value;
-        const password = document.getElementById('login-password').value;
-        if (!email || !password) { alert("Please enter both email and password."); return; }
-        auth.signInWithEmailAndPassword(email, password).catch(err => alert(`Error: ${err.message}`));
-    });
-    logoutButton.addEventListener('click', () => auth.signOut());
 });
 
 console.log("Welcome to We-Up! The journey of a thousand miles begins with a single step.");
