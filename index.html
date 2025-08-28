@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>We-Up</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div id="auth-container">
+        <h1>Welcome to We-Up</h1>
+        <div id="login-form">
+            <h2>Login</h2>
+            <input type="email" id="login-email" placeholder="Email" aria-label="Login Email" required>
+            <input type="password" id="login-password" placeholder="Password" aria-label="Login Password" required>
+            <button id="login-button">Login</button>
+            <p>Don't have an account? <a href="#" id="show-signup">Sign Up</a></p>
+        </div>
+        <div id="signup-form" style="display: none;">
+            <h2>Sign Up</h2>
+            <input type="email" id="signup-email" placeholder="Email" aria-label="Sign Up Email" required>
+            <input type="password" id="signup-password" placeholder="Password" aria-label="Sign Up Password" required>
+            <button id="signup-button">Sign Up</button>
+            <p>Already have an account? <a href="#" id="show-login">Login</a></p>
+        </div>
+    </div>
+
+    <div id="app-container" style="display: none;">
+        <header>
+            <h1>My Dashboard</h1>
+            <button id="logout-button">Logout</button>
+        </header>
+        <main>
+            <div id="motivational-message" class="message-box" role="status"></div>
+            <div id="goals-container">
+                <h2>My Goals</h2>
+                <div id="goals-list">
+                    <!-- Goals will be dynamically added here -->
+                    <p>You haven't set any goals yet. Let's add one!</p>
+                </div>
+                <button id="add-goal-button">+ Add Goal</button>
+            </div>
+        </main>
+    </div>
+
+    <!-- Goal Modal -->
+    <div id="goal-modal" class="modal" role="dialog" aria-labelledby="modal-title">
+        <div class="modal-content">
+            <span class="close-button" aria-label="Close modal">&times;</span>
+            <h2 id="modal-title">Add a New Goal</h2>
+            <form id="goal-form">
+                <input type="hidden" id="goal-id">
+                <input type="text" id="goal-title" placeholder="Goal Title (e.g., Learn Guitar)" aria-label="Goal Title" required>
+                <textarea id="goal-description" placeholder="Description (e.g., Practice 30 mins a day)" aria-label="Goal Description"></textarea>
+                <button type="submit" id="save-goal-button">Save Goal</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Progress Modal -->
+    <div id="progress-modal" class="modal" role="dialog" aria-labelledby="progress-modal-title">
+        <div class="modal-content">
+            <span class="close-button" aria-label="Close modal">&times;</span>
+            <h2 id="progress-modal-title">Goal Progress</h2>
+            <div class="chart-container" style="position: relative; height:200px; width:100%; margin-bottom: 20px;">
+                <canvas id="progress-chart" role="img" aria-label="Progress Chart"></canvas>
+            </div>
+            <div id="progress-list" aria-live="polite">
+                <!-- Progress entries will be loaded here -->
+            </div>
+            <form id="progress-form">
+                <h3>Log New Progress</h3>
+                <input type="number" id="progress-value" placeholder="Value (e.g., 20)" aria-label="Progress Value" required>
+                <textarea id="progress-note" placeholder="What did you accomplish today? (optional)" aria-label="Progress Note"></textarea>
+                <button type="submit">Log Progress</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
